@@ -33,6 +33,74 @@ export async function selectCycle(page: Page, cycle: CycleType): Promise<void> {
 }
 
 /**
+ * 强化3: 页面活跃保持
+ * 在9:45后定期与页面交互，防止页面失效
+ */
+export async function keepPageAlive(page: Page): Promise<() => void> {
+  console.log('🔥 启动页面活跃保持机制...');
+
+  // 注入保持活跃的脚本
+  await page.evaluate(() => {
+    // 定期轻微滚动页面，模拟用户活动
+    const keepAlive = () => {
+      // 轻微滚动，然后回到原位
+      window.scrollBy(0, 1);
+      setTimeout(() => window.scrollBy(0, -1), 50);
+
+      // 更新全局最后活动时间
+      (window as any).__lastActivityTime = Date.now();
+    };
+
+    // 每 30 秒执行一次
+    const intervalId = setInterval(keepAlive, 30000);
+
+    // 监听页面可见性变化
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') {
+        (window as any).__lastActivityTime = Date.now();
+      }
+    });
+
+    // 存储 intervalId 以便清理
+    (window as any).__keepAliveInterval = intervalId;
+    (window as any).__keepAliveActive = true;
+  });
+
+  // 返回清理函数
+  return async () => {
+    await page.evaluate(() => {
+      if ((window as any).__keepAliveInterval) {
+        clearInterval((window as any).__keepAliveInterval);
+        (window as any).__keepAliveActive = false;
+      }
+    });
+    console.log('🛑 页面活跃保持机制已停止');
+  };
+}
+
+/**
+ * 强化4: 预刷新页面
+ * 在 9:55 主动刷新页面，确保获取最新状态
+ */
+export async function preRefreshPage(page: Page): Promise<void> {
+  console.log('🔄 执行预刷新...');
+
+  try {
+    // 先尝试轻量刷新
+    await page.evaluate(() => {
+      // 模拟页面刷新但不丢失状态
+      location.reload();
+    });
+
+    // 等待页面重新加载
+    await page.waitForLoadState('networkidle', { timeout: 30000 });
+    console.log('✅ 预刷新完成');
+  } catch (error) {
+    console.log('⚠️ 预刷新遇到问题，继续当前页面');
+  }
+}
+
+/**
  * 强化1: MutationObserver 极速监控
  * 在页面注入 MutationObserver，监控按钮状态变化，响应速度比 waitForFunction 快10倍
  */
@@ -127,8 +195,8 @@ export async function injectMutationObserver(
 }
 
 /**
- * 强化2: 本地时钟精确同步
- * 使用忙等待机制，确保毫秒级精确度
+ * 强化2: 本地时钟精确同步 + 秒级倒计时显示
+ * 使用忙等待机制，确保毫秒级精确度，同时显示实时倒计时
  */
 export async function preciseWaitUntil(
   targetHour: number,
@@ -144,22 +212,40 @@ export async function preciseWaitUntil(
   }
 
   const targetTime = target.getTime();
-  const waitMs = targetTime - Date.now();
+  let waitMs = targetTime - Date.now();
 
   if (waitMs <= 0) {
     console.log('⏰ 抢购时间到！');
     return;
   }
 
+  // 显示初始等待时间
   const waitMinutes = Math.floor(waitMs / 60000);
+  const waitSeconds = Math.floor((waitMs % 60000) / 1000);
   console.log(
-    `⏰ 等待到 ${target.toLocaleTimeString()}（约 ${waitMinutes} 分钟）...`
+    `⏰ 等待到 ${target.toLocaleTimeString()}（约 ${waitMinutes} 分 ${waitSeconds} 秒）...`
   );
 
-  // 先使用 setTimeout 等待到目标时间前 100ms
-  const preWaitTime = waitMs - 100;
-  if (preWaitTime > 0) {
-    await new Promise((resolve) => setTimeout(resolve, preWaitTime));
+  // 秒级倒计时显示（用于大于30秒的等待）
+  if (waitMs > 30000) {
+    const countdownInterval = setInterval(() => {
+      waitMs = targetTime - Date.now();
+      if (waitMs <= 100) {
+        clearInterval(countdownInterval);
+        return;
+      }
+      const mins = Math.floor(waitMs / 60000);
+      const secs = Math.floor((waitMs % 60000) / 1000);
+      process.stdout.write(`\r⏰ 倒计时: ${mins.toString().padStart(2, '0')} 分 ${secs.toString().padStart(2, '0')} 秒    `);
+    }, 1000);
+
+    // 等待到目标时间前 100ms
+    await new Promise((resolve) => setTimeout(resolve, waitMs - 100));
+    clearInterval(countdownInterval);
+    process.stdout.write('\n');
+  } else {
+    // 直接等待到目标时间前 100ms
+    await new Promise((resolve) => setTimeout(resolve, waitMs - 100));
   }
 
   // 忙等待最后 100ms，精确到毫秒级

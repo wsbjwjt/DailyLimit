@@ -8,6 +8,7 @@ import {
   injectMutationObserver,
   preciseWaitUntil,
   purchaseWithRetry,
+  keepPageAlive,
 } from './purchase';
 import { runCli, printHelp } from './cli';
 
@@ -64,13 +65,33 @@ async function main() {
     const prepareTime = new Date();
     prepareTime.setHours(9, 50, 0, 0);
 
+    // 强化3: 启动页面活跃保持（防止 9:45 后页面失效）
+    console.log('🔥 启动页面活跃保持机制（防止 9:45 页面失效）...');
+    const stopKeepAlive = await keepPageAlive(page);
+
     if (now < prepareTime) {
       const waitMs = prepareTime.getTime() - now.getTime();
       const waitMinutes = Math.floor(waitMs / 60000);
+      const waitSeconds = Math.floor((waitMs % 60000) / 1000);
       console.log(
-        `⏰ 等待到 9:50 开始准备（约 ${waitMinutes} 分钟）...`
+        `⏰ 等待到 9:50 开始准备（${waitMinutes} 分 ${waitSeconds} 秒）...`
       );
+
+      // 秒级倒计时显示
+      const countdownInterval = setInterval(() => {
+        const remainingMs = prepareTime.getTime() - Date.now();
+        if (remainingMs <= 0) {
+          clearInterval(countdownInterval);
+          return;
+        }
+        const mins = Math.floor(remainingMs / 60000);
+        const secs = Math.floor((remainingMs % 60000) / 1000);
+        process.stdout.write(`\r⏰ 倒计时: ${mins.toString().padStart(2, '0')} 分 ${secs.toString().padStart(2, '0')} 秒    `);
+      }, 1000);
+
       await new Promise((resolve) => setTimeout(resolve, waitMs));
+      clearInterval(countdownInterval);
+      process.stdout.write('\n');
     }
 
     // 步骤 4: 刷新页面确保会话有效
@@ -83,6 +104,9 @@ async function main() {
 
     // 步骤 5: 精确等待到 10:00
     await preciseWaitUntil(10, 0);
+
+    // 停止页面活跃保持（抢购阶段不需要）
+    await stopKeepAlive();
 
     // 步骤 6: 执行抢购（MutationObserver会自动点击）
     const success = await purchaseWithRetry(page, {
