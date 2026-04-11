@@ -123,6 +123,7 @@ dailylimit
 🕙 10:00  监控购买按钮状态，立即点击
 ✅ 成功   停留在支付页面，你手动完成付款
 ```
+<img width="1655" height="1150" alt="image" src="https://github.com/user-attachments/assets/0a8548ae-8e8c-4662-a5ac-325f1dff7d8d" />
 
 ## 套餐说明
 
