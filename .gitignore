@@ -1,0 +1,37 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+*.tsbuildinfo
+
+# Environment variables
+.env
+.env.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+
+# Test output
+test-results/
+playwright-report/
+playwright/.cache/
+
+# Playwright MCP
+.playwright-mcp/
+
+# Project planning files
+.plans/
+CLAUDE.md
