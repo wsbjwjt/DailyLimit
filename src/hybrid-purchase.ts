@@ -6,6 +6,7 @@
  */
 
 import { chromium, Browser, Page } from 'playwright';
+import * as QRCode from 'qrcode';
 import * as dotenv from 'dotenv';
 import * as path from 'path';
 import { loadConfig } from './config';
@@ -33,6 +34,7 @@ const PRODUCTS = {
 class HybridPurchaser {
   private success = false;
   private browser: Browser | null = null;
+  private page: Page | null = null;
   private token = '';
   private apiCheckCount = 0;
   private browserCheckCount = 0;
@@ -87,14 +89,14 @@ class HybridPurchaser {
       viewport: { width: 1280, height: 800 },
     });
 
-    const page = await context.newPage();
+    this.page = await context.newPage();
 
     try {
       // 登录
-      await login(page, { username, password });
+      await login(this.page, { username, password });
 
       // 访问购买页面
-      await navigateToPurchasePage(page);
+      await navigateToPurchasePage(this.page);
 
       // 等待到9:50
       const now = new Date();
@@ -109,27 +111,27 @@ class HybridPurchaser {
 
       // 启动页面活跃保持
       console.log('[浏览器] 启动页面活跃保持...');
-      const stopKeepAlive = await keepPageAlive(page);
+      const stopKeepAlive = await keepPageAlive(this.page);
 
       // 刷新页面并记录日志
       console.log('[浏览器] 刷新页面...');
       const refreshStart = Date.now();
-      await page.reload({ waitUntil: 'networkidle' });
+      await this.page.reload({ waitUntil: 'networkidle' });
       console.log(`[浏览器] ✅ 页面刷新完成 (${Date.now() - refreshStart}ms)`);
 
       // 检查登录状态
-      const hasLoginButton = await page.getByRole('button', { name: '登录 / 注册' }).isVisible().catch(() => false);
+      const hasLoginButton = await this.page.getByRole('button', { name: '登录 / 注册' }).isVisible().catch(() => false);
       console.log(`[浏览器] 登录状态: ${hasLoginButton ? '未登录' : '已登录'}`);
 
       if (hasLoginButton) {
         console.log('[浏览器] 重新登录...');
-        await login(page, { username, password });
-        await navigateToPurchasePage(page);
+        await login(this.page, { username, password });
+        await navigateToPurchasePage(this.page);
       }
 
       // 注入MutationObserver
       console.log('[浏览器] 注入MutationObserver监控...');
-      await injectMutationObserver(page, this.plan, this.cycle);
+      await injectMutationObserver(this.page, this.plan, this.cycle);
 
       // 精确等待到10:00
       await preciseWaitUntil(10, 0);
@@ -143,7 +145,7 @@ class HybridPurchaser {
 
       while (Date.now() - startWait < 10000 && !this.success) {
         this.browserCheckCount++;
-        const url = page.url();
+        const url = this.page.url();
 
         if (url.includes('checkout') || url.includes('payment') || url.includes('order')) {
           console.log('\n[浏览器] 🎉 检测到跳转至支付页面！');
@@ -204,20 +206,73 @@ class HybridPurchaser {
         console.log(`[API] [${time}] 第${this.apiCheckCount}次检查 ${status} (已运行${elapsed}s)`);
       }
 
-      // 如果有货，通知成功
+      // 如果有货，尝试创建订单并支付
       if (available) {
         console.log('\n[API] 🎉 检测到库存！');
         console.log(`[API] 产品: ${productInfo?.productId}`);
         console.log(`[API] 价格: ￥${productInfo?.payAmount}`);
         console.log(`[API] soldOut: ${productInfo?.soldOut}`);
 
-        // API方案发现库存，但浏览器可能已经在支付页面了
-        // 如果是API先发现，需要打开浏览器让用户支付
-        if (!this.success) {
-          console.log('\n[API] ⚠️ API先发现库存，但浏览器方案可能也在处理中');
-          console.log('[API] 请检查浏览器是否已跳转到支付页面');
+        // 尝试创建订单
+        console.log('[API] 🚀 尝试创建订单...');
+        const orderResult = await this.createOrder();
+
+        if (orderResult.success && orderResult.orderId) {
+          console.log(`[API] ✅ 订单创建成功: ${orderResult.orderId}`);
+
+          // 获取支付链接
+          const payUrl = `${API_BASE}/payment?orderId=${orderResult.orderId}`;
+
+          // 生成二维码
+          let qrCodeString = '';
+          try {
+            qrCodeString = await QRCode.toString(payUrl, {
+              type: 'terminal',
+              small: true
+            });
+          } catch (e) {
+            // 忽略二维码生成错误
+          }
+
+          console.log('\n' + '='.repeat(70));
+          console.log('🎉 抢购成功！请完成支付');
+          console.log('='.repeat(70));
+
+          // 显示二维码
+          if (qrCodeString) {
+            console.log('\n📱 手机扫码支付:');
+            console.log(qrCodeString);
+          }
+
+          console.log('\n💻 电脑支付:');
+          console.log(`  ${payUrl}`);
+          console.log('\n新标签页已打开（如有浏览器），或手动复制链接');
+          console.log('按 Ctrl+C 退出程序\n');
+
+          // 打开新标签页（不跳转当前页）
+          if (this.browser && this.page) {
+            try {
+              // 在新标签页打开支付链接
+              await this.page.evaluate((url) => {
+                window.open(url, '_blank');
+              }, payUrl);
+              console.log('[API] ✅ 已在浏览器中打开新标签页');
+            } catch (e) {
+              // 如果无法打开新标签页，不影响主流程
+            }
+          }
+
           this.success = true;
+
+          // 保持程序运行，让用户完成支付
+          await new Promise(() => {});
+          return;
+        } else {
+          console.log(`[API] ❌ 订单创建失败: ${orderResult.message}`);
+          console.log('[API] 尝试使用浏览器方案...');
         }
+
+        this.success = true;
         return;
       }
 
@@ -298,6 +353,56 @@ class HybridPurchaser {
     } catch (error) {
       return { available: false, productInfo: null };
     }
+  }
+
+  async createOrder(): Promise<{ success: boolean; orderId?: string; message: string }> {
+    const productId = PRODUCTS[this.plan][this.cycle];
+    const endpoints = [
+      `${API_BASE}/api/biz/order/create`,
+      `${API_BASE}/api/biz/subscription/purchase`,
+      `${API_BASE}/api/biz/subscription/create`,
+    ];
+
+    const payloads = [
+      { productId, quantity: 1 },
+      { productId, quantity: 1, invitationCode: '' },
+      { productId },
+      { skuId: productId, quantity: 1 },
+    ];
+
+    for (const endpoint of endpoints) {
+      for (const payload of payloads) {
+        try {
+          console.log(`[API]   尝试: ${endpoint}`);
+          const response = await fetch(endpoint, {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${this.token}`,
+              'Content-Type': 'application/json',
+              'Accept': 'application/json',
+            },
+            body: JSON.stringify(payload),
+          });
+
+          const data = await response.json().catch(() => null);
+
+          if (data?.success) {
+            const orderId = data.data?.orderId || data.data?.id || data.data?.orderNo;
+            if (orderId) {
+              return { success: true, orderId, message: '订单创建成功' };
+            }
+          }
+
+          if (data?.msg) {
+            console.log(`[API]   响应: ${data.msg}`);
+          }
+        } catch (e) {
+          // 忽略错误
+        }
+      }
+    }
+
+    return { success: false, message: '未找到可用的订单创建API' };
   }
 }
 

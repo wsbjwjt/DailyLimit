@@ -5,6 +5,7 @@
  * 9:57开始不断轮询检测库存，一旦available立即购买
  */
 
+import * as QRCode from 'qrcode';
 import * as dotenv from 'dotenv';
 import * as path from 'path';
 
@@ -117,18 +118,107 @@ class ApiPurchaser {
     }
   }
 
-  async attemptPurchase(): Promise<boolean> {
+  async attemptPurchase(): Promise<{ success: boolean; orderId?: string; payUrl?: string; message: string }> {
     console.log('\n🚀 尝试购买...');
     console.log(`   产品: ${this.targetProduct.name}`);
     console.log(`   价格: ￥${this.targetProduct.price}`);
 
-    // 这里需要实际的购买API，目前先用日志占位
-    // 实际API需要在10:00时抓包获取
+    // 尝试订单创建API
+    const orderResult = await this.createOrder();
+    if (!orderResult.success) {
+      return { success: false, message: orderResult.message };
+    }
 
-    console.log('⚠️ 购买API尚未确认，请在10:00时使用浏览器完成购买');
-    console.log('💡 或者运行: npm run capture:auto 来捕获购买API');
+    // 尝试获取支付链接
+    const payResult = await this.getPayUrl(orderResult.orderId!);
+    if (!payResult.success) {
+      return { success: false, orderId: orderResult.orderId, message: payResult.message };
+    }
 
-    return false;
+    return {
+      success: true,
+      orderId: orderResult.orderId,
+      payUrl: payResult.payUrl,
+      message: '订单创建成功，请完成支付'
+    };
+  }
+
+  async createOrder(): Promise<{ success: boolean; orderId?: string; message: string }> {
+    const endpoints = [
+      `${API_BASE}/api/biz/order/create`,
+      `${API_BASE}/api/biz/subscription/purchase`,
+      `${API_BASE}/api/biz/subscription/create`,
+    ];
+
+    const payloads = [
+      { productId: this.targetProduct.id, quantity: 1 },
+      { productId: this.targetProduct.id, quantity: 1, invitationCode: '' },
+      { productId: this.targetProduct.id },
+      { skuId: this.targetProduct.id, quantity: 1 },
+    ];
+
+    for (const endpoint of endpoints) {
+      for (const payload of payloads) {
+        try {
+          console.log(`  尝试: ${endpoint}`);
+          const response = await fetch(endpoint, {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${this.token}`,
+              'Content-Type': 'application/json',
+              'Accept': 'application/json',
+            },
+            body: JSON.stringify(payload),
+          });
+
+          const data = await response.json().catch(() => null);
+
+          if (data?.success) {
+            const orderId = data.data?.orderId || data.data?.id || data.data?.orderNo;
+            if (orderId) {
+              console.log(`✅ 订单创建成功: ${orderId}`);
+              return { success: true, orderId, message: '订单创建成功' };
+            }
+          }
+
+          // 记录失败原因
+          if (data?.msg) {
+            console.log(`   响应: ${data.msg}`);
+          }
+        } catch (e) {
+          // 忽略网络错误
+        }
+      }
+    }
+
+    return { success: false, message: '未找到可用的订单创建API' };
+  }
+
+  async getPayUrl(orderId: string): Promise<{ success: boolean; payUrl?: string; message: string }> {
+    // 直接构造支付页面URL
+    const payUrl = `${API_BASE}/payment?orderId=${orderId}`;
+    console.log(`💰 支付链接: ${payUrl}`);
+    return { success: true, payUrl, message: '获取支付链接成功' };
+  }
+
+  async checkOrderStatus(orderId: string): Promise<{ paid: boolean; status?: string }> {
+    try {
+      const response = await fetch(`${API_BASE}/api/biz/order/detail?orderId=${orderId}`, {
+        headers: {
+          'Authorization': `Bearer ${this.token}`,
+          'Accept': 'application/json',
+        },
+      });
+
+      const data = await response.json();
+      if (data.success && data.data) {
+        const status = data.data.status || data.data.orderStatus;
+        return { paid: status === 'PAID' || status === 'SUCCESS', status };
+      }
+    } catch (e) {
+      // 忽略错误
+    }
+    return { paid: false };
   }
 
   async startMonitoring(startHour: number = 9, startMinute: number = 57) {
@@ -203,13 +293,40 @@ class ApiPurchaser {
       if (available) {
         console.log('\n🎉 检测到库存！立即尝试购买...');
         this.stopMonitoring();
-        const success = await this.attemptPurchase();
+        const result = await this.attemptPurchase();
 
-        if (success) {
-          console.log('\n✅ 购买成功！');
+        if (result.success) {
+          console.log('\n✅ 订单创建成功！');
+          console.log(`   订单ID: ${result.orderId}`);
+
+          // 生成二维码
+          let qrCodeString = '';
+          try {
+            qrCodeString = await QRCode.toString(result.payUrl!, {
+              type: 'terminal',
+              small: true
+            });
+          } catch (e) {
+            // 忽略二维码生成错误
+          }
+
+          console.log('\n' + '='.repeat(60));
+          console.log('🎉 抢购成功！请完成支付');
+          console.log('='.repeat(60));
+
+          // 显示二维码
+          if (qrCodeString) {
+            console.log('\n📱 手机扫码支付:');
+            console.log(qrCodeString);
+          }
+
+          console.log('\n💻 电脑支付:');
+          console.log(`  ${result.payUrl}`);
+          console.log('\n按 Ctrl+C 退出程序\n');
           process.exit(0);
         } else {
-          console.log('\n❌ 购买失败，继续轮询...');
+          console.log(`\n❌ 购买失败: ${result.message}`);
+          console.log('继续轮询...\n');
           this.startMonitoring(startHour, startMinute);
         }
       }
