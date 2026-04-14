@@ -14,15 +14,14 @@ BIGMODEL_PASSWORD=你的密码
 
 ### 2. 启动抢购
 
-#### 方案A: 终极混合方案（推荐）
 ```bash
 # 默认抢购 Pro 季度套餐
-npm run purchase
+npm start
 
 # 指定套餐和周期
-npm run purchase pro quarterly    # Pro季度
-npm run purchase max monthly      # Max月度
-npm run purchase lite yearly      # Lite年度
+npm start pro quarterly    # Pro季度
+npm start max monthly      # Max月度
+npm start lite yearly      # Lite年度
 ```
 
 **特点：**
@@ -30,11 +29,6 @@ npm run purchase lite yearly      # Lite年度
 - 2个浏览器实例同时操作
 - API发现库存后立即触发浏览器点击
 - 谁先成功谁优先
-
-#### 方案B: 原方案
-```bash
-npm start
-```
 
 ---
 
