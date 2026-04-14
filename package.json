@@ -8,7 +8,11 @@
   },
   "scripts": {
     "build": "tsc",
-    "start": "node dist/index.js"
+    "start": "node dist/index.js",
+    "purchase": "node dist/ultimate-purchase.js",
+    "capture": "node dist/capture-api.js",
+    "test-api": "node dist/api-test.js",
+    "test-order": "node dist/order-test.js"
   },
   "keywords": [
     "glm",
