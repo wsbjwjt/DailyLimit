@@ -22,7 +22,9 @@ const PLAN_INDEX: Record<string, number> = { lite: 0, pro: 1, max: 2 };
 
 export async function navigateToPurchasePage(page: Page): Promise<void> {
   console.log('🔄 访问购买页面...');
-  await page.goto('https://bigmodel.cn/glm-coding', { waitUntil: 'networkidle' });
+  await page.goto('https://bigmodel.cn/glm-coding', { waitUntil: 'domcontentloaded', timeout: 60000 });
+  // 额外等待一会儿让页面完全渲染
+  await page.waitForTimeout(2000);
   console.log('✅ 已加载购买页面');
 }
 
@@ -92,8 +94,8 @@ export async function preRefreshPage(page: Page): Promise<void> {
       location.reload();
     });
 
-    // 等待页面重新加载
-    await page.waitForLoadState('networkidle', { timeout: 30000 });
+    // 等待页面重新加载（使用load而不是networkidle避免超时）
+    await page.waitForLoadState('load', { timeout: 30000 });
     console.log('✅ 预刷新完成');
   } catch (error) {
     console.log('⚠️ 预刷新遇到问题，继续当前页面');

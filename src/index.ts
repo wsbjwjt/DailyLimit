@@ -158,8 +158,8 @@ class UltimatePurchaser {
         const refreshStart = Date.now();
 
         try {
-          // 刷新页面
-          await this.page.reload({ waitUntil: 'networkidle', timeout: 15000 });
+          // 刷新页面（使用domcontentloaded避免networkidle超时）
+          await this.page.reload({ waitUntil: 'domcontentloaded', timeout: 10000 });
           const refreshDuration = Date.now() - refreshStart;
 
           // 检查登录状态

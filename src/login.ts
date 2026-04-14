@@ -8,8 +8,8 @@ export interface LoginCredentials {
 export async function login(page: Page, credentials: LoginCredentials): Promise<void> {
   console.log('🔄 正在登录...');
 
-  // 访问首页
-  await page.goto('https://bigmodel.cn/', { waitUntil: 'networkidle' });
+  // 访问首页（使用domcontentloaded更快，避免networkidle超时）
+  await page.goto('https://bigmodel.cn/', { waitUntil: 'domcontentloaded', timeout: 60000 });
 
   // 点击登录/注册按钮
   await page.getByRole('button', { name: '登录 / 注册' }).click();
